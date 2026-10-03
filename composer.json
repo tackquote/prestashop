@@ -2,7 +2,7 @@
     "name": "tackquote/prestashop-tackquotes",
     "description": "TackQuote for PrestaShop \u2014 adds a Request a Quote button to product pages and connects the shop to a TackQuote B2B quoting account.",
     "type": "prestashop-module",
-    "license": "OSL-3.0",
+    "license": "GPL-2.0-or-later",
     "authors": [
         {
             "name": "PrestaShop SA",

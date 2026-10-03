@@ -1,6 +1,6 @@
 # TackQuote for PrestaShop
 
-> Part of the TackQuote integrations family. All platforms are indexed in the hub repository: [ackm04/tack-ecommerce-extensions](https://github.com/ackm04/tack-ecommerce-extensions) (TackQuote integrations index).
+> Part of the TackQuote integrations family. All platforms are indexed in the hub repository: [tackquote/tack-ecommerce-extensions](https://github.com/tackquote/tack-ecommerce-extensions) (TackQuote integrations index).
 
 A PrestaShop 1.7 / 8.x module that adds a "Request a Quote" button to product
 pages and connects the store to a TackQuote B2B quoting account (API base URL
