@@ -7,3 +7,7 @@
 
 # php-cs-fixer's own cache, machine-local.
 /.php-cs-fixer.cache
+
+# Build output from scripts/package.sh, and macOS litter.
+/dist/
+.DS_Store
