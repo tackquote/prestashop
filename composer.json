@@ -5,8 +5,8 @@
     "license": "GPL-2.0-or-later",
     "authors": [
         {
-            "name": "PrestaShop SA",
-            "email": "contact@prestashop.com"
+            "name": "TackQuote",
+            "homepage": "https://tackquote.com"
         }
     ],
     "require": {
