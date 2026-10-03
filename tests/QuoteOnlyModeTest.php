@@ -4,7 +4,7 @@
  * Behavioural tests for quote-only / B2B catalog mode.
  *
  * Run: docker run --rm -v "$PWD":/p -w /p php:8.3-cli \
- *          php prestashop/modules/tackquotes/tests/QuoteOnlyModeTest.php
+ *          php tests/QuoteOnlyModeTest.php
  *
  * These load the REAL TackQuotes class against the stubs in stubs.php and call the
  * real guard, rather than asserting on the text of the source. A grep-shaped test
@@ -387,7 +387,7 @@ check(
 // module as the container root, where basename() is the mount point and not the module
 // folder. `tackquotes` is asserted as a literal on both sides instead — PrestaShop
 // requires <name>, $this->name and the folder to agree, and the folder name is fixed by
-// the repository layout and by the zip scripts/package-all.sh builds.
+// the zip scripts/package.sh builds (its top-level directory), not by the checkout name.
 preg_match("/\\\$this->name\\s*=\\s*'([^']+)'/", $moduleSource, $nameMatch);
 
 check(
@@ -419,8 +419,16 @@ $changelogAt = strpos($readme, '## Changelog');
 $readmeInstructions = $changelogAt === false ? $readme : substr($readme, 0, $changelogAt);
 
 check(
-    'README links the release asset scripts/package-all.sh actually builds',
+    'README links the release asset scripts/package.sh actually builds',
     strpos($readme, 'releases/latest/download/tack-prestashop.zip') !== false
+);
+check(
+    // This module was split out of the hub monorepo, whose packager was
+    // scripts/package-all.sh. Here it is scripts/package.sh; a reader who runs the old
+    // name gets "No such file or directory".
+    'README documents the packager this repository actually has (scripts/package.sh)',
+    strpos($readmeInstructions, 'scripts/package.sh') !== false
+        && strpos($readmeInstructions, 'scripts/package-all.sh') === false
 );
 check(
     'README does not pin a version tag that goes stale on any other platform release',
@@ -431,6 +439,8 @@ check(
     'README does not document packaging paths from the retired monorepo',
     strpos($readmeInstructions, 'cd integrations/prestashop') === false
         && strpos($readmeInstructions, '`integrations/wordpress/') === false
+        && strpos($readmeInstructions, 'cd prestashop/modules') === false
+        && strpos($readmeInstructions, 'php prestashop/modules/tackquotes/') === false
 );
 
 // ---------------------------------------------------------------------------

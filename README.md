@@ -1,9 +1,10 @@
 # TackQuote for PrestaShop
 
+> Part of the TackQuote integrations family. All platforms are indexed in the hub repository: [ackm04/tack-ecommerce-extensions](https://github.com/ackm04/tack-ecommerce-extensions) (TackQuote integrations index).
+
 A PrestaShop 1.7 / 8.x module that adds a "Request a Quote" button to product
 pages and connects the store to a TackQuote B2B quoting account (API base URL
-+ API key). It mirrors the pattern used by the TackQuote WooCommerce plugin at
-`wordpress/tackquote/`.
++ API key). It mirrors the pattern used by the TackQuote WooCommerce plugin.
 
 This module is **separate** from `apps/api/src/modules/integrations/prestashop/prestashop.service.ts`.
 That service is Tack acting as a client of *your* store's PrestaShop
@@ -15,20 +16,20 @@ key, the same way the WooCommerce plugin does.
 ## Installation
 
 Distribution authority: the public GitHub release asset is
-[`tack-prestashop.zip`](https://github.com/ackm04/tack-ecommerce-extensions/releases/latest/download/tack-prestashop.zip),
-built by `scripts/package-all.sh`. The link resolves to the newest release rather than a
-pinned tag, because this repository cuts one repo-wide `v*` tag covering every platform.
-This directory is source only. No PrestaShop Addons listing is claimed.
+[`tack-prestashop.zip`](https://github.com/__REPO_SLUG__/releases/latest/download/tack-prestashop.zip),
+built by `scripts/package.sh`. The link resolves to the newest release rather than a
+pinned tag, so it never goes stale when the next version ships.
+This repository is source only. No PrestaShop Addons listing is claimed.
 
-1. Download `tack-prestashop.zip` and follow the included README, or zip the
-   `tackquotes/` directory itself (not its parent) if you are packaging from this
-   checkout:
+1. Download `tack-prestashop.zip` and follow the included README, or build it from
+   this checkout. The module is the repository root, and the zip's top-level folder
+   must be `tackquotes/` whatever your checkout is called, so use the packager rather
+   than zipping the checkout by hand:
    ```
-   cd prestashop/modules
-   zip -r tackquotes.zip tackquotes
+   bash scripts/package.sh        # writes dist/tack-prestashop.zip
    ```
 2. In your PrestaShop back office, go to **Modules > Module Manager > Upload a module**
-   and upload `tackquotes.zip`.
+   and upload `tack-prestashop.zip`.
 3. Once installed, click **Configure** on the TackQuote module.
 4. Enter your **TackQuote API URL** (defaults to `https://api.tackquote.com/v1`)
    and paste your **TackQuote API key** (create one in TackQuote under
@@ -258,10 +259,10 @@ PrestaShop stubs and calls the real guard — it asserts behaviour, not source t
 
 ```
 docker run --rm -v "$PWD":/p -w /p php:8.3-cli \
-  php prestashop/modules/tackquotes/tests/QuoteOnlyModeTest.php
+  php tests/QuoteOnlyModeTest.php
 ```
 
-`tests/` is excluded from the release zip by `scripts/package-all.sh`.
+`tests/` is excluded from the release zip by `scripts/package.sh`.
 
 ### Not verified
 
