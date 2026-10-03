@@ -16,7 +16,7 @@ key, the same way the WooCommerce plugin does.
 ## Installation
 
 Distribution authority: the public GitHub release asset is
-[`tack-prestashop.zip`](https://github.com/__REPO_SLUG__/releases/latest/download/tack-prestashop.zip),
+[`tack-prestashop.zip`](https://github.com/tackquote/prestashop/releases/latest/download/tack-prestashop.zip),
 built by `scripts/package.sh`. The link resolves to the newest release rather than a
 pinned tag, so it never goes stale when the next version ships.
 This repository is source only. No PrestaShop Addons listing is claimed.
