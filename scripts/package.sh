@@ -3,7 +3,7 @@
 # Build the installable PrestaShop artifact, reproducibly: dist/tack-prestashop.zip.
 #
 # Split out of the hub repository's scripts/package-all.sh
-# (https://github.com/tackquote/tack-ecommerce-extensions) when this module moved to
+# (tackquote/tack-ecommerce-extensions, retired 2026-10-04) when this module moved to
 # its own repository, where the module IS the repository root.
 #
 # "The `name` attribute ... MUST be the same as the module's folder and main
