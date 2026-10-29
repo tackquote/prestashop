@@ -124,7 +124,7 @@ class TackQuotesQuoteRequestModuleFrontController extends ModuleFrontController
             }
         }
 
-        $client = new TackApiClient($apiUrl, $apiKey);
+        $client = new TackApiClient($apiUrl, $apiKey, $this->module->version);
         $result = $client->createQuoteRequest($payload);
 
         if (is_string($result)) {

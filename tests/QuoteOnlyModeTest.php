@@ -430,6 +430,51 @@ check('isCartMutationRequest: delete is not a mutation we block', !TackQuoteOnly
 check('isCartMutationRequest: plain cart view', !TackQuoteOnlyMode::isCartMutationRequest(['action' => 'show'], []));
 
 // ---------------------------------------------------------------------------
+// 9b. TackApiClient raises no deprecation on the PHP it runs on.
+//
+// curl_close() is deprecated in PHP 8.5, which PrestaShop 9.1 recommends. A deprecation
+// printed by a shop in debug mode lands in front of the quote-request JSON. This drives a
+// REAL request through the real client with deprecations turned into exceptions, against
+// 127.0.0.1:9 (discard port; connection refused at once, no network needed). It can only
+// go red on PHP >= 8.5, so CI runs it on 8.5.
+// ---------------------------------------------------------------------------
+check('the curl extension is loaded (the client cannot run without it)', function_exists('curl_init'));
+
+if (function_exists('curl_init')) {
+    $deprecations = [];
+    set_error_handler(function ($errno, $errstr) use (&$deprecations) {
+        $deprecations[] = $errstr;
+
+        throw new ErrorException($errstr, 0, $errno);
+    }, E_DEPRECATED | E_USER_DEPRECATED);
+
+    $clientThrew = null;
+    $clientResult = null;
+    try {
+        $client = new TackApiClient('http://127.0.0.1:9', 'test_key', '1.3.1');
+        $clientResult = $client->request('GET', '/integrations/prestashop/ping');
+    } catch (ErrorException $e) {
+        $clientThrew = $e->getMessage();
+    }
+    restore_error_handler();
+
+    check(
+        'TackApiClient::request() raises no deprecation on PHP ' . PHP_VERSION
+            . ($clientThrew !== null ? ' (got: ' . $clientThrew . ')' : ''),
+        $clientThrew === null && $deprecations === []
+    );
+    check(
+        'TackApiClient::request() reports a refused connection as an error string, never success',
+        is_string($clientResult) && strpos($clientResult, 'Connection error') === 0
+    );
+}
+
+$uaClient = new TackApiClient('https://api.tackquote.com/v1', 'k', '1.3.1');
+check('User-Agent carries the module version it was given', $uaClient->userAgent() === 'TackQuotes-PrestaShop/1.3.1');
+$uaClient = new TackApiClient('https://api.tackquote.com/v1', 'k');
+check('User-Agent claims no version when none was given', $uaClient->userAgent() === 'TackQuotes-PrestaShop');
+
+// ---------------------------------------------------------------------------
 // 10. The manifest and the documented contract.
 //
 // Added when this module was reconciled against the TackQuote monorepo copy before that

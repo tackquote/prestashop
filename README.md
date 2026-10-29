@@ -274,6 +274,13 @@ cart through it.
   a shopper who had a cart when the switch was flipped must be able to empty it rather
   than be stranded with items they can no longer check out.
 - **Checkout is blocked** by core, at `controllers/front/OrderController.php:246`.
+- **Known gap: "Reorder" refills a cart.** The `submitReorder` action copies a past
+  order's products into a new cart without going through `CartController`'s `add`/`update`
+  route, so quote-only does not refuse it. Checkout is still refused, so no order results.
+  Pre-existing, found in review; not changed here.
+- **Known gap: `PaymentModule::validateOrder()` has no catalog-mode check.** A payment
+  module's own validation endpoint, called directly with a cart that already holds
+  products, is not stopped by quote-only. Pre-existing, found in review; not changed here.
 - **Post-purchase pages are explicitly left alone** — `history`, `order-detail`,
   `order-follow`, `order-slip`, `order-return`. Core's catalog mode redirects all five
   away (`HistoryController.php:48`, `OrderDetailController.php:157`,
@@ -359,7 +366,12 @@ Fixed:
   closed.
 - **PHP 8.5.** `curl_close()` is deprecated in PHP 8.5 (a no-op since 8.0), and 9.1
   recommends 8.5. It is now called only on PHP 7, so a shop in debug mode does not print
-  a deprecation in front of the quote-request JSON.
+  a deprecation in front of the quote-request JSON. Pinned by a test that sends a real
+  request through `TackApiClient` with deprecations turned into exceptions; CI now runs
+  the tests on PHP 8.1, 8.3 and 8.5 and lints on PHP 7.2.
+- **User-Agent.** The client sent `TackQuotes-PrestaShop/1.0.0` whatever version was
+  installed; it now sends the installed module version. Informational only; TackQuote
+  does not read it.
 
 Checked against PrestaShop 9 and needing no change (docs MCP *Changes in PrestaShop
 9.0.x / 9.1.x / 9.2.x*, then 9.2.0 source):
@@ -399,7 +411,8 @@ Checked against PrestaShop 9 and needing no change (docs MCP *Changes in PrestaS
   (`index.php?fc=module&…`), never to a module PHP file, and the zip ships no
   `composer.json`.
 - **`config.xml`.** PrestaShop regenerates it at install; it carries no version range.
-- **Wire contract with TackQuote.** Unchanged: same routes, headers and payload.
+- **Wire contract with TackQuote.** Unchanged: same routes, auth headers and payload.
+  Only the informational `User-Agent` version string differs (see above).
 
 ### 1.3.1 — documentation and manifest guards only, no runtime change
 

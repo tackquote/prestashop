@@ -19,14 +19,34 @@ class TackApiClient
     /** @var string */
     protected $apiKey;
 
+    /** @var string */
+    protected $moduleVersion;
+
     /**
      * @param string $baseUrl e.g. https://api.tackquote.com/v1 (no trailing slash).
      * @param string $apiKey tenant's TackQuote API key
+     * @param string $moduleVersion the installed module's version (TackQuotes::$version),
+     *                              sent in the User-Agent. Optional so an older caller
+     *                              still constructs the client.
      */
-    public function __construct($baseUrl, $apiKey)
+    public function __construct($baseUrl, $apiKey, $moduleVersion = '')
     {
         $this->baseUrl = rtrim((string) $baseUrl, '/');
         $this->apiKey = (string) $apiKey;
+        $this->moduleVersion = (string) $moduleVersion;
+    }
+
+    /**
+     * The User-Agent sent to TackQuote. It used to be the literal
+     * "TackQuotes-PrestaShop/1.0.0" whatever version was installed; it now carries the
+     * real module version, or no version at all when the caller did not supply one.
+     * Nothing on the TackQuote side parses it (informational only).
+     *
+     * @return string
+     */
+    public function userAgent()
+    {
+        return 'TackQuotes-PrestaShop' . ($this->moduleVersion !== '' ? '/' . $this->moduleVersion : '');
     }
 
     /**
@@ -51,7 +71,7 @@ class TackApiClient
             'X-Api-Key: ' . $this->apiKey,
             'Content-Type: application/json',
             'Accept: application/json',
-            'User-Agent: TackQuotes-PrestaShop/1.0.0',
+            'User-Agent: ' . $this->userAgent(),
         ];
 
         $ch = curl_init($url);

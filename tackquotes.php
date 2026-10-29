@@ -307,7 +307,8 @@ class TackQuotes extends Module
     {
         $client = new TackApiClient(
             Configuration::get(self::CONFIG_API_URL),
-            Configuration::get(self::CONFIG_API_KEY)
+            Configuration::get(self::CONFIG_API_KEY),
+            $this->version
         );
 
         $result = $client->testConnection();
@@ -497,7 +498,8 @@ class TackQuotes extends Module
      * converts the legacy parameters to that route (classes/Link.php:754-838), and so do
      * PrestaShop's own native modules (ps_emailsubscription). `tab_module` is kept because
      * it is not a route parameter, so the URL always carries a query string for HelperForm
-     * to append "&token=..." to (admin-dev/.../helpers/form/form.tpl:18).
+     * to append "&token=..." to (admin-dev/.../helpers/form/form.tpl:18). `module_name` is
+     * kept for parity with ps_emailsubscription's call, which passes exactly these three.
      *
      * Not used on 1.7/8: Link::getAdminLink() only took ($controller, $withToken) before
      * 1.7.5, so the extra arguments would be ignored there and "&configure" lost.
