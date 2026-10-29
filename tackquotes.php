@@ -88,8 +88,11 @@ class TackQuotes extends Module
         // An explicit maximum. `'max' => _PS_VERSION_` is the version currently running,
         // so the compatibility test compares a version against itself and can never fail —
         // it declares compatibility with everything, including majors that do not exist
-        // yet. 8.99.99 says what has actually been exercised.
-        $this->ps_versions_compliancy = ['min' => '1.7.0.0', 'max' => '8.99.99'];
+        // yet. Module::checkCompliancy() is a plain version_compare against both bounds
+        // (classes/module/Module.php:523-530 in PrestaShop 9.2.0), so the previous
+        // '8.99.99' refused every 9.x shop. '9.99.99' is the bound PrestaShop's own v9
+        // module tutorial uses; 10.x stays refused until it has been audited.
+        $this->ps_versions_compliancy = ['min' => '1.7.0.0', 'max' => '9.99.99'];
 
         parent::__construct();
 
@@ -442,7 +445,7 @@ class TackQuotes extends Module
         $helper->default_form_language = (int) Context::getContext()->language->id;
         $helper->identifier = $this->identifier;
         $helper->submit_action = 'submitTackQuotesSettings';
-        $helper->currentIndex = AdminController::$currentIndex . '&configure=' . $this->name;
+        $helper->currentIndex = $this->configureUrl();
         $helper->token = Tools::getAdminTokenLite('AdminModules');
         $helper->fields_value = [
             self::CONFIG_API_URL => Configuration::get(self::CONFIG_API_URL) ?: self::DEFAULT_API_URL,
@@ -469,7 +472,7 @@ class TackQuotes extends Module
         // "Test connection" block, appended below the HelperForm — mirrors the
         // WooCommerce plugin's separate "Test connection" form.
         $this->context->smarty->assign([
-            'test_connection_url' => AdminController::$currentIndex . '&configure=' . $this->name
+            'test_connection_url' => $this->configureUrl()
                 . '&token=' . Tools::getAdminTokenLite('AdminModules'),
         ]);
         $testHtml = $this->fetch('module:tackquotes/views/templates/admin/configure.tpl');
@@ -478,8 +481,58 @@ class TackQuotes extends Module
     }
 
     /**
+     * The URL this module's Configure page posts back to, without a token.
+     *
+     * PrestaShop 1.7 and 8 render getContent() from the legacy AdminModulesController,
+     * whose init() sets AdminController::$currentIndex to
+     * "index.php?controller=AdminModules", so appending "&configure=<name>" is the
+     * Configure URL. That is the path every installed copy of this module has used.
+     *
+     * PrestaShop 9 deleted controllers/admin/AdminModulesController.php. getContent() is
+     * called from the Symfony ModuleController::configureModuleAction()
+     * (src/PrestaShopBundle/Controller/Admin/Improve/ModuleController.php:102-135 in
+     * 9.2.0), whose URL is a Symfony route, so a legacy "index.php?controller=..." form
+     * action no longer points at the page that runs getContent(). The v9 docs ("Adding a
+     * configuration page (Legacy architecture)") build it with Link::getAdminLink(), which
+     * converts the legacy parameters to that route (classes/Link.php:754-838), and so do
+     * PrestaShop's own native modules (ps_emailsubscription). `tab_module` is kept because
+     * it is not a route parameter, so the URL always carries a query string for HelperForm
+     * to append "&token=..." to (admin-dev/.../helpers/form/form.tpl:18).
+     *
+     * Not used on 1.7/8: Link::getAdminLink() only took ($controller, $withToken) before
+     * 1.7.5, so the extra arguments would be ignored there and "&configure" lost.
+     *
+     * UNVERIFIED in a running PrestaShop 9 back office; derived from 9.2.0 source.
+     *
+     * @return string
+     */
+    protected function configureUrl()
+    {
+        if (version_compare($this->runningPrestaShopVersion(), '9.0.0', '>=')) {
+            return $this->context->link->getAdminLink('AdminModules', false, [], [
+                'configure' => $this->name,
+                'tab_module' => $this->tab,
+                'module_name' => $this->name,
+            ]);
+        }
+
+        return AdminController::$currentIndex . '&configure=' . $this->name;
+    }
+
+    /**
+     * The PrestaShop version this request is running on. A method so the version-guarded
+     * paths can be exercised by tests/QuoteOnlyModeTest.php, where _PS_VERSION_ is fixed.
+     *
+     * @return string
+     */
+    protected function runningPrestaShopVersion()
+    {
+        return (string) _PS_VERSION_;
+    }
+
+    /**
      * Storefront "Request a Quote" button on the product page.
-     * Hook: displayProductActions — the current PS 1.7/8 hook for action
+     * Hook: displayProductActions — the PS 1.7/8/9 hook for action
      * buttons near "Add to cart" on the product detail page.
      *
      * @param array $params hook params, includes 'product'
@@ -822,11 +875,30 @@ class TackQuotes extends Module
      * comparison is hash_equals rather than core's `==` because there is no reason
      * for a token check here to be timing-variable.
      *
+     * PrestaShop 9 replaced that check. ProductController::init() now asks the
+     * LegacyAdminTokenValidator service, which validates `adtoken` as a Symfony CSRF
+     * token held in the employee's back-office session
+     * (controllers/front/ProductController.php:135-141 and
+     * src/PrestaShopBundle/Security/Admin/LegacyAdminTokenValidator.php in 9.2.0), and
+     * Tools::getAdminToken() itself now returns the Symfony user token whenever a kernel
+     * container exists (classes/Tools.php:1256-1266). The 1.7/8 hash below can therefore
+     * never match a 9.x preview token, and calling it from the front office is not
+     * something 9.x documents as safe. So on 9.x this answers false: an employee preview
+     * sees the quote-only storefront, exactly as native catalog mode treats a preview.
+     * That fails CLOSED — no shopper can reach the cart through it. Calling core's
+     * validator from here was rejected: it builds and starts a session on the main
+     * request, and ProductController::init() does the same moments later.
+     * UNVERIFIED in a running 9.x shop.
+     *
      * @return bool
      */
     protected function isEmployeePreview()
     {
         if ('1' !== Tools::getValue('preview')) {
+            return false;
+        }
+
+        if (version_compare($this->runningPrestaShopVersion(), '9.0.0', '>=')) {
             return false;
         }
 

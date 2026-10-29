@@ -69,7 +69,14 @@ class TackApiClient
         $errno = curl_errno($ch);
         $error = curl_error($ch);
         $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
+        // curl_close() has been a no-op since PHP 8.0 and is deprecated as of PHP 8.5
+        // (php.net/curl_close). PrestaShop 9.1 makes 8.5 its recommended PHP, and a
+        // deprecation notice printed by a shop in debug mode would land in front of the
+        // JSON this module's front controller answers with. Still called on PHP 7, where
+        // it releases the handle; PrestaShop 1.7 runs there.
+        if (PHP_VERSION_ID < 80000) {
+            curl_close($ch);
+        }
 
         if ($errno) {
             return sprintf('Connection error: %s', $error);

@@ -2,9 +2,36 @@
 
 > Part of the TackQuote integrations family. All platforms are listed on the TackQuote GitHub organization page: [github.com/tackquote](https://github.com/tackquote) (TackQuote integrations index).
 
-A PrestaShop 1.7 / 8.x module that adds a "Request a Quote" button to product
+A PrestaShop 1.7 / 8.x / 9.x module that adds a "Request a Quote" button to product
 pages and connects the store to a TackQuote B2B quoting account (API base URL
 + API key). It mirrors the pattern used by the TackQuote WooCommerce plugin.
+
+## Compatibility
+
+One zip serves every supported version. Where PrestaShop 9 changed the ground under the
+module, the code takes a version-guarded path and 1.7/8 keep the one they always had.
+
+| PrestaShop | Status |
+| --- | --- |
+| 1.7.0 – 1.7.8 | Supported (unchanged) |
+| 8.0 – 8.2 | Supported (unchanged) |
+| 9.0 – 9.2 | Supported in source; **not yet exercised in a running 9.x shop** |
+| 10.x | Refused at install (`ps_versions_compliancy` max `9.99.99`) until audited |
+
+PHP: the module itself needs PHP 7.2.5 or later and runs on whatever PHP your PrestaShop
+version supports. PrestaShop 9.0 requires PHP 8.1 and supports up to 8.4; 9.1 adds 8.5,
+its recommended version (PrestaShop's *System requirements for PrestaShop 9*; the 9.2
+row is not in that chart yet, and 9.2.0's `composer.json` declares `php >= 8.1`).
+
+Themes: the product-page hooks this module uses (`displayProductActions`,
+`displayProductAdditionalInfo`, `displayFooter`) sit in the same places in the Classic
+theme (`classic-theme` 3.1.2) and in Hummingbird 2.1.2, the default theme for fresh
+PrestaShop 9.1+ installs: in both, `displayProductActions` is inside the
+`{if !$configuration.is_catalog}` guard and `displayProductAdditionalInfo` is outside it.
+The storefront script is plain JavaScript (no jQuery, which Hummingbird deprecates).
+
+What changed for PrestaShop 9, and what did not, is listed under *Unreleased* in the
+changelog below.
 
 This module is **separate** from `apps/api/src/modules/integrations/prestashop/prestashop.service.ts`.
 That service is Tack acting as a client of *your* store's PrestaShop
@@ -55,7 +82,7 @@ This repository is source only. No PrestaShop Addons listing is claimed.
   page anywhere in the repo, `apps/web` included).
 - **Storefront button** (`hookDisplayProductActions` in `tackquotes.php` +
   `views/templates/hook/quote_button.tpl` + `views/js/tackquotes.js`) — a real
-  hook implementation. `displayProductActions` is the current PrestaShop 1.7/8
+  hook implementation. `displayProductActions` is the PrestaShop 1.7/8/9
   hook for action buttons rendered next to "Add to cart" on the product page.
   The button opens a small modal (email, quantity, note) and POSTs to this
   module's own front controller.
@@ -230,6 +257,13 @@ cart" from a preview page is still refused unless the request itself carries the
 preview credentials. Native catalog mode has no preview exemption at all, so this is
 strictly better, not worse.
 
+**On PrestaShop 9 there is no preview exemption.** 9.x validates `adtoken` as a Symfony
+CSRF token held in the employee's back-office session (`LegacyAdminTokenValidator`,
+called from `ProductController::init()`), which the 1.7/8 hash cannot reproduce. The
+check answers *not a preview* on 9.x, so an employee preview sees the quote-only
+storefront — the same as native catalog mode. It fails closed: no shopper reaches the
+cart through it.
+
 ### Existing carts, and the order route
 
 - **Existing carts are not deleted.** Toggling quote-only on leaves every cart row
@@ -275,7 +309,12 @@ docker run --rm -v "$PWD":/p -w /p php:8.3-cli \
   include the visitor's groups (`classes/module/Module.php:2225-2228`), which is the
   right shape, but this was not confirmed against a running shop with caching on.
   Treat quote-only + full-page caching as unverified.
-- Themes other than `classic` were not inspected.
+- Themes other than `classic` and Hummingbird were not inspected.
+- **PrestaShop 9 has not been run.** The 9.x support is derived from the 9.2.0 source
+  (fetched from the `PrestaShop/PrestaShop` repository at tag `9.2.0`), the PrestaShop 9
+  docs (docs MCP: *Changes in PrestaShop 9.0.x / 9.1.x / 9.2.x*), and the theme
+  repositories named above. No module zip was installed on a 9.x shop, no Configure page
+  was rendered in a 9.x back office, and no quote was sent from a 9.x storefront.
 
 ## Not implemented (out of scope for this scaffold)
 
@@ -293,6 +332,74 @@ docker run --rm -v "$PWD":/p -w /p php:8.3-cli \
   is implemented, matching the task's storefront button requirement).
 
 ## Changelog
+
+### Unreleased — PrestaShop 9 support
+
+PrestaShop 9.2.0 shipped on 2026-09-30, and the module refused to install on any 9.x
+shop. Every change below is version-guarded; 1.7 and 8 run the code they ran before.
+Not yet exercised in a running PrestaShop 9 shop (see *Not verified*).
+
+Fixed:
+
+- **Install was refused on 9.x.** `ps_versions_compliancy` max was `8.99.99`, and
+  `Module::checkCompliancy()` is a plain `version_compare` against it
+  (`classes/module/Module.php:523-530` in 9.2.0). Now `9.99.99`, the bound PrestaShop's
+  own v9 module tutorial uses. The minimum stays `1.7.0.0`; 10.x stays refused.
+- **The Configure page would have posted to a URL that does not exist on 9.x.** 9.0
+  deleted the legacy `AdminModulesController`; `getContent()` now runs inside the Symfony
+  `ModuleController::configureModuleAction()`. On 9.x the settings form and the
+  "Test connection" form now take their URL from `Link::getAdminLink('AdminModules', false,
+  [], ['configure' => …])`, as the v9 docs (*Adding a configuration page (Legacy
+  architecture)*) and PrestaShop's own `ps_emailsubscription` do. 1.7/8 keep
+  `AdminController::$currentIndex`.
+- **Employee preview on 9.x.** 9.x validates the preview `adtoken` with
+  `LegacyAdminTokenValidator` (a Symfony CSRF token), and `Tools::getAdminToken()` now
+  returns the Symfony user token whenever a kernel exists. The 1.7/8 check cannot match
+  and is no longer called on 9.x: preview there sees the quote-only storefront, failing
+  closed.
+- **PHP 8.5.** `curl_close()` is deprecated in PHP 8.5 (a no-op since 8.0), and 9.1
+  recommends 8.5. It is now called only on PHP 7, so a shop in debug mode does not print
+  a deprecation in front of the quote-request JSON.
+
+Checked against PrestaShop 9 and needing no change (docs MCP *Changes in PrestaShop
+9.0.x / 9.1.x / 9.2.x*, then 9.2.0 source):
+
+- **Hooks.** None of the five hooks this module registers is in 9.0's removed-hooks list.
+  `actionFrontControllerInitBefore` is still the first statement of
+  `FrontController::init()` (`classes/controller/FrontController.php:205-212`).
+- **Themes.** In Classic (`classic-theme` 3.1.2) and Hummingbird 2.1.2,
+  `displayProductActions` is inside `{if !$configuration.is_catalog}` and
+  `displayProductAdditionalInfo` is outside it, the layout quote-only mode depends on.
+  Hummingbird calls `displayFooter` and `$HOOK_HEADER`.
+- **Quote-only enforcement.** `Configuration::set()` still writes only the in-memory
+  cache (`classes/Configuration.php:358-385`); `CartController` (lines 89, 116, 156),
+  `OrderController::initContent()` (line 265) and `Cart` still consult
+  `Configuration::isCatalogMode()`; the cart still routes on `add`/`update`/`delete`
+  (`CartController.php:231-233`); the five post-purchase controllers keep their
+  `php_self` names. 9.2's One Page Checkout runs inside `OrderController`, behind the same
+  catalog-mode redirect (UNVERIFIED in a running shop).
+- **Legacy classes and Tools methods.** Every one the module calls still exists with a
+  compatible signature: `Tools::getValue/isSubmit/getAdminTokenLite/redirect/strtoupper`,
+  `Validate::isEmail/isName/isAbsoluteUrl/isUnsignedId/isLoadedObject`,
+  `Customer::getGroupsStatic/isLogged`, `Group::getGroups`, `Product::getPriceStatic`,
+  `Link::getModuleLink/getProductLink/getPageLink`, `HelperForm`,
+  `FrontController::registerStylesheet/registerJavascript`, `Module::trans/fetch/
+  registerHook/getTranslator/isUsingNewTranslationSystem`. None is on 9.0's removal list
+  (which does remove `ajaxDie`; the front controller uses `ajaxRender()`, unchanged).
+- **Front controller.** 9.0 added return types to core front controllers, but
+  `Controller::postProcess()` and `FrontController::postProcess()` are still untyped, so
+  the module's untyped override stays compatible; `$ajax` is still an untyped property.
+- **Symfony 6.4, Twig, API Platform (Admin API).** The module uses none of them: no
+  Symfony services, no Twig templates, no Admin API resources.
+- **Smarty and `trans()`.** 9.0 stops `trans()`/`{l}` from escaping. Every translated
+  string that reaches an HTML attribute already passes through `|escape:'html':'UTF-8'`;
+  the rest are fixed wordings with no markup.
+- **Module directory hardening** (9.0 blocks direct `*.php`, `*.json`, `*.yml` … requests
+  under `modules/`). The storefront posts to the module front controller
+  (`index.php?fc=module&…`), never to a module PHP file, and the zip ships no
+  `composer.json`.
+- **`config.xml`.** PrestaShop regenerates it at install; it carries no version range.
+- **Wire contract with TackQuote.** Unchanged: same routes, headers and payload.
 
 ### 1.3.1 — documentation and manifest guards only, no runtime change
 
