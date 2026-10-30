@@ -114,9 +114,14 @@ class Tools
         return self::getValue($key) !== false;
     }
 
+    /** @var int how many times getAdminToken() was reached */
+    public static $adminTokenCalls = 0;
+
     /** classes/Tools.php:1291-1294 */
     public static function getAdminToken($string)
     {
+        ++self::$adminTokenCalls;
+
         return !empty($string) ? sha1('stub-salt' . $string) : false;
     }
 
@@ -208,6 +213,28 @@ class StubLink
     {
         return 'https://shop.test/module/' . $module . '/' . $controller;
     }
+
+    /** @var array[] arguments of every getAdminLink() call */
+    public $adminLinkCalls = [];
+
+    /**
+     * classes/Link.php:754 (9.2.0). Answers with the shape LegacyUrlConverter gives for
+     * the module configure route, so a test can tell which path built the URL.
+     */
+    public function getAdminLink($controller, $withToken = true, $sfRouteParams = [], $params = [])
+    {
+        $this->adminLinkCalls[] = func_get_args();
+
+        return 'https://shop.test/admin-x/index.php/improve/modules/manage/action/configure/'
+            . (isset($params['module_name']) ? $params['module_name'] : '')
+            . '?' . http_build_query(array_diff_key($params, ['module_name' => 1]));
+    }
+}
+
+/** Only the static the module reads. classes/controller/AdminController.php:30 */
+class AdminController
+{
+    public static $currentIndex = 'index.php?controller=AdminModules';
 }
 
 class StubContext

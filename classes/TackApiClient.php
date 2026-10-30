@@ -19,14 +19,34 @@ class TackApiClient
     /** @var string */
     protected $apiKey;
 
+    /** @var string */
+    protected $moduleVersion;
+
     /**
      * @param string $baseUrl e.g. https://api.tackquote.com/v1 (no trailing slash).
      * @param string $apiKey tenant's TackQuote API key
+     * @param string $moduleVersion the installed module's version (TackQuotes::$version),
+     *                              sent in the User-Agent. Optional so an older caller
+     *                              still constructs the client.
      */
-    public function __construct($baseUrl, $apiKey)
+    public function __construct($baseUrl, $apiKey, $moduleVersion = '')
     {
         $this->baseUrl = rtrim((string) $baseUrl, '/');
         $this->apiKey = (string) $apiKey;
+        $this->moduleVersion = (string) $moduleVersion;
+    }
+
+    /**
+     * The User-Agent sent to TackQuote. It used to be the literal
+     * "TackQuotes-PrestaShop/1.0.0" whatever version was installed; it now carries the
+     * real module version, or no version at all when the caller did not supply one.
+     * Nothing on the TackQuote side parses it (informational only).
+     *
+     * @return string
+     */
+    public function userAgent()
+    {
+        return 'TackQuotes-PrestaShop' . ($this->moduleVersion !== '' ? '/' . $this->moduleVersion : '');
     }
 
     /**
@@ -51,7 +71,7 @@ class TackApiClient
             'X-Api-Key: ' . $this->apiKey,
             'Content-Type: application/json',
             'Accept: application/json',
-            'User-Agent: TackQuotes-PrestaShop/1.0.0',
+            'User-Agent: ' . $this->userAgent(),
         ];
 
         $ch = curl_init($url);
@@ -69,7 +89,14 @@ class TackApiClient
         $errno = curl_errno($ch);
         $error = curl_error($ch);
         $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
+        // curl_close() has been a no-op since PHP 8.0 and is deprecated as of PHP 8.5
+        // (php.net/curl_close). PrestaShop 9.1 makes 8.5 its recommended PHP, and a
+        // deprecation notice printed by a shop in debug mode would land in front of the
+        // JSON this module's front controller answers with. Still called on PHP 7, where
+        // it releases the handle; PrestaShop 1.7 runs there.
+        if (PHP_VERSION_ID < 80000) {
+            curl_close($ch);
+        }
 
         if ($errno) {
             return sprintf('Connection error: %s', $error);

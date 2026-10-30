@@ -29,6 +29,21 @@ class TestableTackQuotes extends TackQuotes
     {
         return $this->quoteWidgetRendered;
     }
+
+    /** @var string|null pretend to run on this PrestaShop version instead of _PS_VERSION_ */
+    public $fakePrestaShopVersion = null;
+
+    protected function runningPrestaShopVersion()
+    {
+        return $this->fakePrestaShopVersion !== null
+            ? $this->fakePrestaShopVersion
+            : parent::runningPrestaShopVersion();
+    }
+
+    public function exposedConfigureUrl()
+    {
+        return $this->configureUrl();
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -201,6 +216,70 @@ check(
     runGuard($module, 'cart', [], ['add' => 1, 'id_product' => 7]) === 'refused'
 );
 
+// PrestaShop 9 validates preview tokens with LegacyAdminTokenValidator (a Symfony CSRF
+// token in the employee's session), which the 1.7/8 hash can never reproduce, and its
+// Tools::getAdminToken() is not documented as safe from the front office. On 9.x the
+// exemption must fail CLOSED and must not reach Tools::getAdminToken() at all, even with
+// a token that the 1.7/8 rule would have accepted.
+foreach (['9.0.0', '9.2.0'] as $ps9) {
+    $module = makeModule($ON);
+    $module->fakePrestaShopVersion = $ps9;
+    Tools::$request = ['preview' => '1', 'adtoken' => $goodToken, 'id_employee' => 3];
+    Tools::$adminTokenCalls = 0;
+    check(
+        'PrestaShop ' . $ps9 . ': preview with a 1.7/8-valid token is still refused the cart',
+        runGuard($module, 'cart', [], ['add' => 1, 'id_product' => 7]) === 'refused'
+    );
+    check(
+        'PrestaShop ' . $ps9 . ': the preview check never calls Tools::getAdminToken()',
+        Tools::$adminTokenCalls === 0
+    );
+}
+
+$module = makeModule($ON);
+$module->fakePrestaShopVersion = '8.2.8';
+Tools::$request = ['preview' => '1', 'adtoken' => $goodToken, 'id_employee' => 3];
+check(
+    'PrestaShop 8.2.8: the 1.7/8 preview exemption is unchanged',
+    runGuard($module, 'cart', [], ['add' => 1, 'id_product' => 7]) === 'allowed'
+);
+
+// ---------------------------------------------------------------------------
+// 4b. The Configure page posts back to the page that runs getContent().
+//
+// PrestaShop 9 deleted the legacy AdminModulesController; getContent() runs inside the
+// Symfony ModuleController, so the form action has to come from Link::getAdminLink().
+// 1.7/8 keep the AdminController::$currentIndex path they have always used.
+// ---------------------------------------------------------------------------
+foreach (['1.7.0.0', '1.7.8.11', '8.2.8'] as $legacyVersion) {
+    $module = makeModule();
+    $module->fakePrestaShopVersion = $legacyVersion;
+    check(
+        'PrestaShop ' . $legacyVersion . ': Configure URL is the legacy AdminModules index',
+        $module->exposedConfigureUrl() === 'index.php?controller=AdminModules&configure=tackquotes'
+            && $module->context->link->adminLinkCalls === []
+    );
+}
+
+foreach (['9.0.0', '9.2.0'] as $ps9) {
+    $module = makeModule();
+    $module->fakePrestaShopVersion = $ps9;
+    $url = $module->exposedConfigureUrl();
+    $call = isset($module->context->link->adminLinkCalls[0]) ? $module->context->link->adminLinkCalls[0] : [];
+    check(
+        'PrestaShop ' . $ps9 . ': Configure URL comes from Link::getAdminLink(AdminModules, no token, configure=tackquotes)',
+        count($module->context->link->adminLinkCalls) === 1
+            && $call[0] === 'AdminModules'
+            && $call[1] === false
+            && isset($call[3]['configure']) && $call[3]['configure'] === 'tackquotes'
+            && isset($call[3]['module_name']) && $call[3]['module_name'] === 'tackquotes'
+    );
+    check(
+        'PrestaShop ' . $ps9 . ': Configure URL carries a query string, so "&token=" appends cleanly',
+        strpos($url, '?') !== false && strpos($url, 'index.php?controller=AdminModules') === false
+    );
+}
+
 // ---------------------------------------------------------------------------
 // 5. Customer-group scoping.
 // ---------------------------------------------------------------------------
@@ -351,6 +430,51 @@ check('isCartMutationRequest: delete is not a mutation we block', !TackQuoteOnly
 check('isCartMutationRequest: plain cart view', !TackQuoteOnlyMode::isCartMutationRequest(['action' => 'show'], []));
 
 // ---------------------------------------------------------------------------
+// 9b. TackApiClient raises no deprecation on the PHP it runs on.
+//
+// curl_close() is deprecated in PHP 8.5, which PrestaShop 9.1 recommends. A deprecation
+// printed by a shop in debug mode lands in front of the quote-request JSON. This drives a
+// REAL request through the real client with deprecations turned into exceptions, against
+// 127.0.0.1:9 (discard port; connection refused at once, no network needed). It can only
+// go red on PHP >= 8.5, so CI runs it on 8.5.
+// ---------------------------------------------------------------------------
+check('the curl extension is loaded (the client cannot run without it)', function_exists('curl_init'));
+
+if (function_exists('curl_init')) {
+    $deprecations = [];
+    set_error_handler(function ($errno, $errstr) use (&$deprecations) {
+        $deprecations[] = $errstr;
+
+        throw new ErrorException($errstr, 0, $errno);
+    }, E_DEPRECATED | E_USER_DEPRECATED);
+
+    $clientThrew = null;
+    $clientResult = null;
+    try {
+        $client = new TackApiClient('http://127.0.0.1:9', 'test_key', '1.3.1');
+        $clientResult = $client->request('GET', '/integrations/prestashop/ping');
+    } catch (ErrorException $e) {
+        $clientThrew = $e->getMessage();
+    }
+    restore_error_handler();
+
+    check(
+        'TackApiClient::request() raises no deprecation on PHP ' . PHP_VERSION
+            . ($clientThrew !== null ? ' (got: ' . $clientThrew . ')' : ''),
+        $clientThrew === null && $deprecations === []
+    );
+    check(
+        'TackApiClient::request() reports a refused connection as an error string, never success',
+        is_string($clientResult) && strpos($clientResult, 'Connection error') === 0
+    );
+}
+
+$uaClient = new TackApiClient('https://api.tackquote.com/v1', 'k', '1.3.1');
+check('User-Agent carries the module version it was given', $uaClient->userAgent() === 'TackQuotes-PrestaShop/1.3.1');
+$uaClient = new TackApiClient('https://api.tackquote.com/v1', 'k');
+check('User-Agent claims no version when none was given', $uaClient->userAgent() === 'TackQuotes-PrestaShop');
+
+// ---------------------------------------------------------------------------
 // 10. The manifest and the documented contract.
 //
 // Added when this module was reconciled against the TackQuote monorepo copy before that
@@ -408,6 +532,27 @@ check(
     'the class description matches the one merchants see in the module list',
     $manifest !== false
         && strpos($moduleSource, (string) $manifest->description) !== false
+);
+
+// ps_versions_compliancy. Module::checkCompliancy() (classes/module/Module.php:523-530,
+// PrestaShop 9.2.0) is exactly this pair of version_compare calls, so evaluating them on
+// the module's real bounds is what PrestaShop does when it decides "install" or refuse.
+$probe = new TestableTackQuotes();
+$compliancy = $probe->ps_versions_compliancy;
+$compliant = function ($psVersion) use ($compliancy) {
+    return !(version_compare($psVersion, $compliancy['min'], '<')
+        || version_compare($psVersion, $compliancy['max'], '>'));
+};
+foreach (['1.7.0.0', '1.7.8.11', '8.0.0', '8.2.8', '9.0.0', '9.1.5', '9.2.0'] as $supported) {
+    check('ps_versions_compliancy accepts PrestaShop ' . $supported, $compliant($supported));
+}
+foreach (['1.6.1.24', '10.0.0'] as $unsupported) {
+    check('ps_versions_compliancy refuses PrestaShop ' . $unsupported, !$compliant($unsupported));
+}
+check(
+    // `'max' => _PS_VERSION_` compares the running version with itself and never fails.
+    'ps_versions_compliancy max is a literal bound, not _PS_VERSION_',
+    $compliancy['max'] !== _PS_VERSION_ && preg_match('/^\d+\.\d+\.\d+$/', $compliancy['max']) === 1
 );
 
 $readme = file_get_contents($moduleRoot . '/README.md');
