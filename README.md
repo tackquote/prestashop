@@ -346,6 +346,16 @@ PrestaShop 9.2.0 shipped on 2026-09-30, and the module refused to install on any
 shop. Every change below is version-guarded; 1.7 and 8 run the code they ran before.
 Not yet exercised in a running PrestaShop 9 shop (see *Not verified*).
 
+Upgrading from 1.3.x: Module Manager offers the update because `$this->version` and
+`config.xml` both say 1.4.0. No `upgrade/upgrade-1.4.0.php` ships, on purpose: this
+release registers no new hook and adds no table or configuration key, and PrestaShop's
+upgrade scripts exist for exactly those changes (*Enabling the Auto-Update*). The saved
+API URL and API key are kept.
+
+Also in this release: a security policy (`SECURITY.md`, report to
+support@tackquote.com), and CI now lints on PHP 7.2 and runs the tests on PHP 8.1, 8.3
+and 8.5.
+
 Fixed:
 
 - **Install was refused on 9.x.** `ps_versions_compliancy` max was `8.99.99`, and
