@@ -30,7 +30,7 @@ PrestaShop 9.1+ installs: in both, `displayProductActions` is inside the
 `{if !$configuration.is_catalog}` guard and `displayProductAdditionalInfo` is outside it.
 The storefront script is plain JavaScript (no jQuery, which Hummingbird deprecates).
 
-What changed for PrestaShop 9, and what did not, is listed under *Unreleased* in the
+What changed for PrestaShop 9, and what did not, is listed under *1.4.0* in the
 changelog below.
 
 This module is **separate** from `apps/api/src/modules/integrations/prestashop/prestashop.service.ts`.
@@ -340,11 +340,21 @@ docker run --rm -v "$PWD":/p -w /p php:8.3-cli \
 
 ## Changelog
 
-### Unreleased — PrestaShop 9 support
+### 1.4.0 — 2026-11-11 — PrestaShop 9 support
 
 PrestaShop 9.2.0 shipped on 2026-09-30, and the module refused to install on any 9.x
 shop. Every change below is version-guarded; 1.7 and 8 run the code they ran before.
 Not yet exercised in a running PrestaShop 9 shop (see *Not verified*).
+
+Upgrading from 1.3.x: Module Manager offers the update because `$this->version` and
+`config.xml` both say 1.4.0. No `upgrade/upgrade-1.4.0.php` ships, on purpose: this
+release registers no new hook and adds no table or configuration key, and PrestaShop's
+upgrade scripts exist for exactly those changes (*Enabling the Auto-Update*). The saved
+API URL and API key are kept.
+
+Also in this release: a security policy (`SECURITY.md`, report to
+support@tackquote.com), and CI now lints on PHP 7.2 and runs the tests on PHP 8.1, 8.3
+and 8.5.
 
 Fixed:
 
