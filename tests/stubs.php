@@ -352,4 +352,9 @@ abstract class Module
     {
         return 'OK:' . $msg;
     }
+
+    public function displayWarning($msg)
+    {
+        return 'WARN:' . $msg;
+    }
 }

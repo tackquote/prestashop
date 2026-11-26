@@ -340,6 +340,23 @@ docker run --rm -v "$PWD":/p -w /p php:8.3-cli \
 
 ## Changelog
 
+### 1.4.1 — 2026-11-27 — Test connection no longer reports a wrong API key as connected
+
+The *Test connection* button calls `GET /integrations/prestashop/ping`, which TackQuote
+authenticates with the API key. It used to fall back to `GET /health` when the ping
+failed for any reason, and `/health` answers 200 without a key, so a wrong or revoked
+key read "Connected to TackQuote successfully."
+
+- A 401 or 403 from the ping now says *TackQuote rejected this API key*, with no fallback.
+- `/health` is tried only when the ping got no answer (network error, timeout), a 404
+  (an older TackQuote API) or a 5xx. If `/health` then answers, the result is a warning
+  that TackQuote is reachable but the API key could not be checked, never "Connected".
+- Any other ping status (400, 429, ...) is reported as an error with TackQuote's message.
+- Any 2xx ping is connected, including a lapsed TackQuote account, whose ping still
+  answers 200.
+
+No configuration, hook or database change; no `upgrade/upgrade-1.4.1.php` is needed.
+
 ### 1.4.0 — 2026-11-11 — PrestaShop 9 support
 
 PrestaShop 9.2.0 shipped on 2026-09-30, and the module refused to install on any 9.x

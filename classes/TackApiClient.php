@@ -49,6 +49,12 @@ class TackApiClient
         return 'TackQuotes-PrestaShop' . ($this->moduleVersion !== '' ? '/' . $this->moduleVersion : '');
     }
 
+    /** Outcomes of checkConnection(). */
+    const CONNECTION_OK = 'ok';
+    const CONNECTION_KEY_REJECTED = 'key_rejected';
+    const CONNECTION_KEY_UNCHECKED = 'key_unchecked';
+    const CONNECTION_FAILED = 'failed';
+
     /**
      * Perform an authenticated request against the Tack API.
      *
@@ -64,6 +70,25 @@ class TackApiClient
             return 'No TackQuote API key configured.';
         }
 
+        $result = $this->exchange($method, $path, $body);
+
+        return $result['error'] !== null ? $result['error'] : $result['data'];
+    }
+
+    /**
+     * One HTTP exchange, keeping the status code that request() folds into a string.
+     *
+     * `status` is 0 when no HTTP answer arrived at all (DNS, refused, TLS, timeout).
+     * `error` is null exactly when the status is 2xx.
+     *
+     * @param string $method
+     * @param string $path
+     * @param array|null $body
+     *
+     * @return array{status: int, data: array, error: string|null}
+     */
+    protected function exchange($method, $path, $body = null)
+    {
         $url = $this->baseUrl . $path;
 
         $headers = [
@@ -99,40 +124,89 @@ class TackApiClient
         }
 
         if ($errno) {
-            return sprintf('Connection error: %s', $error);
+            return ['status' => 0, 'data' => [], 'error' => sprintf('Connection error: %s', $error)];
         }
 
         $data = json_decode((string) $response, true);
 
         if ($httpCode < 200 || $httpCode >= 300) {
             $message = is_array($data) && isset($data['message'])
-                ? (is_array($data['message']) ? implode(', ', $data['message']) : $data['message'])
+                ? (is_array($data['message']) ? implode(', ', $data['message']) : (string) $data['message'])
                 : sprintf('TackQuote API returned HTTP %d.', $httpCode);
 
-            return $message;
+            return ['status' => $httpCode, 'data' => is_array($data) ? $data : [], 'error' => $message];
         }
 
-        return is_array($data) ? $data : [];
+        return ['status' => $httpCode, 'data' => is_array($data) ? $data : [], 'error' => null];
     }
 
     /**
-     * Lightweight connectivity check.
+     * Connectivity + API-key check for the "Test connection" button.
      *
-     * @return true|string true on success, or an error message string
+     * Calls `GET /integrations/prestashop/ping` (PrestaShopPluginController), which
+     * TackQuote authenticates with the shop's API key. Any 2xx is CONNECTION_OK: a
+     * lapsed TackQuote account still answers 200 (with a reduced `capabilities` list),
+     * and its key is valid.
+     *
+     * 401/403 mean TackQuote rejected the key: CONNECTION_KEY_REJECTED, no fallback.
+     * This used to fall back to `GET /health` on ANY ping failure, and /health answers
+     * 200 without a key, so a wrong or revoked key reported "Connected".
+     *
+     * `/health` is tried only when the ping failure says nothing about the key: no HTTP
+     * answer (network error, timeout), 404 (a TackQuote API older than the route) or
+     * 5xx. If /health then answers 2xx the result is CONNECTION_KEY_UNCHECKED, never OK.
+     * Every other status (400, 429, ...) is CONNECTION_FAILED with TackQuote's message.
+     *
+     * @return array{result: string, message: string} `message` is the ping's own error
+     *                                                text ('' on success)
+     */
+    public function checkConnection()
+    {
+        if ($this->apiKey === '') {
+            return ['result' => self::CONNECTION_FAILED, 'message' => 'No TackQuote API key configured.'];
+        }
+
+        $ping = $this->exchange('GET', '/integrations/prestashop/ping');
+        $status = $ping['status'];
+
+        if ($ping['error'] === null) {
+            return ['result' => self::CONNECTION_OK, 'message' => ''];
+        }
+
+        if ($status === 401 || $status === 403) {
+            return ['result' => self::CONNECTION_KEY_REJECTED, 'message' => (string) $ping['error']];
+        }
+
+        if ($status === 0 || $status === 404 || $status >= 500) {
+            $health = $this->exchange('GET', '/health');
+            if ($health['error'] === null) {
+                return ['result' => self::CONNECTION_KEY_UNCHECKED, 'message' => (string) $ping['error']];
+            }
+        }
+
+        return ['result' => self::CONNECTION_FAILED, 'message' => (string) $ping['error']];
+    }
+
+    /**
+     * Kept for callers written against 1.4.0 and earlier.
+     *
+     * @return true|string true only when TackQuote accepted the API key; otherwise a
+     *                     message. A reachable API with an unchecked key is NOT true.
      */
     public function testConnection()
     {
-        // `GET /integrations/prestashop/ping` DOES exist (PrestaShopPluginController) and
-        // is API-key authenticated, so it is tried first: it proves the key is valid for
-        // this tenant, which /health cannot. The /health fallback is kept only for a Tack
-        // deployment older than that route. The note that used to sit here — "there is
-        // currently no /integrations/prestashop/ping endpoint" — was stale.
-        $result = $this->request('GET', '/integrations/prestashop/ping');
-        if (is_string($result)) {
-            $result = $this->request('GET', '/health');
-        }
+        $check = $this->checkConnection();
 
-        return is_string($result) ? $result : true;
+        switch ($check['result']) {
+            case self::CONNECTION_OK:
+                return true;
+            case self::CONNECTION_KEY_REJECTED:
+                return 'TackQuote rejected this API key. Check it in TackQuote under Settings > Developer > API keys.';
+            case self::CONNECTION_KEY_UNCHECKED:
+                return 'TackQuote is reachable, but the API key could not be checked.';
+            default:
+                return $check['message'];
+        }
     }
 
     /**

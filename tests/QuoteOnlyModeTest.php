@@ -475,6 +475,111 @@ $uaClient = new TackApiClient('https://api.tackquote.com/v1', 'k');
 check('User-Agent claims no version when none was given', $uaClient->userAgent() === 'TackQuotes-PrestaShop');
 
 // ---------------------------------------------------------------------------
+// 9c. Test connection: what each ping status means.
+//
+// The ping used to fall back to /health on ANY failure, and /health answers 200 with no
+// key, so a wrong or revoked key read "Connected". Only exchange() is scripted here;
+// checkConnection() and processTestConnection() are the real code.
+// ---------------------------------------------------------------------------
+class ScriptedTackApiClient extends TackApiClient
+{
+    public $answers = [];
+    public $paths = [];
+
+    protected function exchange($method, $path, $body = null)
+    {
+        $this->paths[] = $method . ' ' . $path;
+
+        return $this->answers[$path];
+    }
+}
+
+function scriptedAnswer($status)
+{
+    if ($status >= 200 && $status < 300) {
+        return ['status' => $status, 'data' => ['ok' => true], 'error' => null];
+    }
+
+    return ['status' => $status, 'data' => [], 'error' => $status === 0 ? 'Connection error: timed out' : 'HTTP ' . $status];
+}
+
+function scriptedClient($pingStatus, $healthStatus = 200)
+{
+    $client = new ScriptedTackApiClient('https://api.tackquote.com/v1', 'live_key', '1.4.1');
+    $client->answers = [
+        '/integrations/prestashop/ping' => scriptedAnswer($pingStatus),
+        '/health' => scriptedAnswer($healthStatus),
+    ];
+
+    return $client;
+}
+
+class ProbeConnectionModule extends TestableTackQuotes
+{
+    public static $client;
+
+    protected function connectionClient()
+    {
+        return self::$client;
+    }
+
+    public function runTestConnection()
+    {
+        return $this->processTestConnection();
+    }
+}
+
+function adminTestConnection($pingStatus, $healthStatus = 200)
+{
+    ProbeConnectionModule::$client = scriptedClient($pingStatus, $healthStatus);
+    makeModule();
+    $module = new ProbeConnectionModule();
+
+    return $module->runTestConnection();
+}
+
+$pingOnly = ['GET /integrations/prestashop/ping'];
+$withHealth = ['GET /integrations/prestashop/ping', 'GET /health'];
+
+$c = scriptedClient(200);
+check('ping 200 -> connected', $c->checkConnection()['result'] === TackApiClient::CONNECTION_OK && $c->paths === $pingOnly);
+check('admin: ping 200 -> confirmation', strpos(adminTestConnection(200), 'OK:Connected') === 0);
+
+foreach ([401, 403] as $st) {
+    $c = scriptedClient($st, 200);
+    check("ping $st -> key rejected, no /health fallback",
+        $c->checkConnection()['result'] === TackApiClient::CONNECTION_KEY_REJECTED && $c->paths === $pingOnly);
+    $html = adminTestConnection($st, 200);
+    check("admin: ping $st -> rejected-key error, never 'Connected'",
+        strpos($html, 'ERROR:TackQuote rejected this API key') === 0 && strpos($html, 'Connected') === false);
+    check("legacy testConnection() on $st is not true", scriptedClient($st, 200)->testConnection() !== true);
+}
+
+foreach ([0, 404, 500, 503] as $st) {
+    $c = scriptedClient($st, 200);
+    check("ping $st + /health 200 -> reachable, key unchecked",
+        $c->checkConnection()['result'] === TackApiClient::CONNECTION_KEY_UNCHECKED && $c->paths === $withHealth);
+    $html = adminTestConnection($st, 200);
+    check("admin: ping $st + /health 200 -> warning, never 'Connected'",
+        strpos($html, 'WARN:TackQuote is reachable, but the API key could not be checked') === 0
+            && stripos($html, 'connected') === false);
+    check("ping $st + /health down -> failed",
+        scriptedClient($st, 0)->checkConnection()['result'] === TackApiClient::CONNECTION_FAILED);
+    check("legacy testConnection() on $st is not true", scriptedClient($st, 200)->testConnection() !== true);
+}
+
+$c = scriptedClient(429, 200);
+check('ping 429 -> failed, no /health fallback',
+    $c->checkConnection()['result'] === TackApiClient::CONNECTION_FAILED && $c->paths === $pingOnly);
+check('admin: ping 429 -> error naming TackQuote\'s message', strpos(adminTestConnection(429), 'ERROR:Could not connect to TackQuote: HTTP 429') === 0);
+
+if (function_exists('curl_init')) {
+    $real = (new TackApiClient('http://127.0.0.1:9', 'live_key', '1.4.1'))->checkConnection();
+    check('real exchange: refused connection -> failed with a Connection error',
+        $real['result'] === TackApiClient::CONNECTION_FAILED && strpos($real['message'], 'Connection error') === 0);
+}
+
+// ---------------------------------------------------------------------------
 // 10. The manifest and the documented contract.
 //
 // Added when this module was reconciled against the TackQuote monorepo copy before that
