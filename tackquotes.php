@@ -323,6 +323,12 @@ class TackQuotes extends Module
                 return $this->displayWarning(
                     $this->trans('TackQuote is reachable, but the API key could not be checked. Try again in a few minutes.', [], 'Modules.Tackquotes.Admin')
                 );
+            case TackApiClient::CONNECTION_WRONG_ADDRESS:
+                // The ping 404'd and TackQuote's own /health answered at that host: the
+                // API URL setting is wrong (usually missing /v1), so "try again" never helps.
+                return $this->displayError(
+                    $this->trans('TackQuote answered, but not at the API address: check the TackQuote API URL setting (it should end in /v1).', [], 'Modules.Tackquotes.Admin')
+                );
             default:
                 // displayError() prints its argument as HTML, and this text came from
                 // whatever host the merchant typed into "TackQuote API URL" (or from a
