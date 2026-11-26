@@ -324,8 +324,15 @@ class TackQuotes extends Module
                     $this->trans('TackQuote is reachable, but the API key could not be checked. Try again in a few minutes.', [], 'Modules.Tackquotes.Admin')
                 );
             default:
+                // displayError() prints its argument as HTML, and this text came from
+                // whatever host the merchant typed into "TackQuote API URL" (or from a
+                // TackQuote 403 such as the plan-limit sentence). Tools::safeOutput()
+                // strips tags and HTML-escapes it (PrestaShop core, 1.7.0.0 through 9).
                 return $this->displayError(
-                    sprintf($this->trans('Could not connect to TackQuote: %s', [], 'Modules.Tackquotes.Admin'), $check['message'])
+                    sprintf(
+                        $this->trans('Could not connect to TackQuote: %s', [], 'Modules.Tackquotes.Admin'),
+                        Tools::safeOutput($check['message'])
+                    )
                 );
         }
     }

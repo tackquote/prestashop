@@ -347,13 +347,17 @@ authenticates with the API key. It used to fall back to `GET /health` when the p
 failed for any reason, and `/health` answers 200 without a key, so a wrong or revoked
 key read "Connected to TackQuote successfully."
 
-- A 401 or 403 from the ping now says *TackQuote rejected this API key*, with no fallback.
+- A 401 from the ping (TackQuote's answer to a wrong, revoked or expired key) now says
+  *TackQuote rejected this API key*, with no fallback.
+- A 403 comes with a valid key (for example the plan's monthly API-call limit) and shows
+  TackQuote's own message, HTML-escaped, with no fallback.
 - `/health` is tried only when the ping got no answer (network error, timeout), a 404
   (an older TackQuote API) or a 5xx. If `/health` then answers, the result is a warning
   that TackQuote is reachable but the API key could not be checked, never "Connected".
 - Any other ping status (400, 429, ...) is reported as an error with TackQuote's message.
-- Any 2xx ping is connected, including a lapsed TackQuote account, whose ping still
-  answers 200.
+- A 2xx counts as connected only when it is the ping's own `{"ok": true}`, so a wrong
+  API URL serving a web page is an error. A lapsed TackQuote account still answers that,
+  so it reads connected.
 
 No configuration, hook or database change; no `upgrade/upgrade-1.4.1.php` is needed.
 
