@@ -475,6 +475,149 @@ $uaClient = new TackApiClient('https://api.tackquote.com/v1', 'k');
 check('User-Agent claims no version when none was given', $uaClient->userAgent() === 'TackQuotes-PrestaShop');
 
 // ---------------------------------------------------------------------------
+// 9c. Test connection: what each ping status means.
+//
+// The ping used to fall back to /health on ANY failure, and /health answers 200 with no
+// key, so a wrong or revoked key read "Connected". Only transport() (the raw cURL call)
+// is scripted; JSON decoding, checkConnection() and processTestConnection() are real.
+//
+// Fixtures are real TackQuote answers: 401, 404 and /health captured from
+// api.tackquote.com on 2026-11-27 (timestamps trimmed); the 403s are the bodies
+// PlanGuard builds (apps/api/src/common/guards/plan.guard.ts).
+// ---------------------------------------------------------------------------
+$fix = [
+    'ping_ok' => '{"ok":true,"tenantId":"00000000-0000-4000-8000-000000000001","capabilities":["lifecycle","lifecycle_feedback"]}',
+    '401' => '{"statusCode":401,"code":"api_key_invalid","message":"Invalid API key","path":"/v1/integrations/prestashop/ping"}',
+    '403_plan' => '{"error":"PLAN_LIMIT_EXCEEDED","resource":"apiCalls","limit":1000,"message":"You have reached your plan limit of 1000 API calls per month. Please upgrade your plan."}',
+    '403_tenant' => '{"statusCode":403,"message":"Tenant not found for plan limit check","error":"Forbidden"}',
+    '404' => '{"statusCode":404,"code":"NOTFOUND","message":"Cannot GET /v1/integrations/prestashop/ping","path":"/v1/integrations/prestashop/ping"}',
+    '500' => '{"statusCode":500,"message":"Internal server error"}',
+    '503' => '<html><body><h1>503 Service Unavailable</h1></body></html>',
+    'html_200' => '<!doctype html><html><head><title>My shop</title></head><body>Welcome</body></html>',
+    'health' => '{"status":"ok","database":"connected","redis":"writable"}',
+    'evil_403' => '{"message":"<img src=x onerror=alert(1)>blocked"}',
+];
+
+class ScriptedTackApiClient extends TackApiClient
+{
+    public $answers = [];
+    public $paths = [];
+
+    protected function transport($method, $path, $body = null)
+    {
+        $this->paths[] = $method . ' ' . $path;
+
+        return $this->answers[$path];
+    }
+}
+
+/** @param array|null $answer [status, body], or null for no HTTP answer at all */
+function rawAnswer($answer)
+{
+    return $answer === null
+        ? ['error' => 'Connection error: Operation timed out after 20001 milliseconds', 'status' => 0, 'body' => '']
+        : ['error' => null, 'status' => $answer[0], 'body' => $answer[1]];
+}
+
+function scriptedClient($ping, $health = 'default')
+{
+    global $fix;
+    if ($health === 'default') {
+        $health = [200, $fix['health']];
+    }
+    $client = new ScriptedTackApiClient('https://api.tackquote.com/v1', 'live_key', '1.4.1');
+    $client->answers = [
+        '/integrations/prestashop/ping' => rawAnswer($ping),
+        '/health' => rawAnswer($health),
+    ];
+
+    return $client;
+}
+
+class ProbeConnectionModule extends TestableTackQuotes
+{
+    public static $client;
+
+    protected function connectionClient()
+    {
+        return self::$client;
+    }
+
+    public function runTestConnection()
+    {
+        return $this->processTestConnection();
+    }
+}
+
+function adminTestConnection($ping, $health = 'default')
+{
+    ProbeConnectionModule::$client = scriptedClient($ping, $health);
+    makeModule();
+    $module = new ProbeConnectionModule();
+
+    return $module->runTestConnection();
+}
+
+$pingOnly = ['GET /integrations/prestashop/ping'];
+$withHealth = ['GET /integrations/prestashop/ping', 'GET /health'];
+
+$c = scriptedClient([200, $fix['ping_ok']]);
+check('ping 200 {"ok":true} -> connected', $c->checkConnection()['result'] === TackApiClient::CONNECTION_OK && $c->paths === $pingOnly);
+check('admin: ping 200 -> confirmation', strpos(adminTestConnection([200, $fix['ping_ok']]), 'OK:Connected') === 0);
+
+$c = scriptedClient([200, $fix['html_200']]);
+check('ping 200 HTML (wrong URL) -> failed, not connected, no fallback',
+    $c->checkConnection()['result'] === TackApiClient::CONNECTION_FAILED && $c->paths === $pingOnly);
+check('admin: ping 200 HTML -> error', strpos(adminTestConnection([200, $fix['html_200']]), 'ERROR:') === 0);
+check('ping 200 {"ok":false} -> not connected', scriptedClient([200, '{"ok":false}'])->testConnection() !== true);
+
+$c = scriptedClient([401, $fix['401']]);
+check('ping 401 api_key_invalid -> key rejected, no /health fallback',
+    $c->checkConnection()['result'] === TackApiClient::CONNECTION_KEY_REJECTED && $c->paths === $pingOnly);
+$html = adminTestConnection([401, $fix['401']]);
+check("admin: ping 401 -> rejected-key error, never 'Connected'",
+    strpos($html, 'ERROR:TackQuote rejected this API key') === 0 && strpos($html, 'Connected') === false);
+check('legacy testConnection() on 401 is not true', scriptedClient([401, $fix['401']])->testConnection() !== true);
+
+foreach (['403_plan', '403_tenant'] as $k) {
+    $c = scriptedClient([403, $fix[$k]]);
+    $r = $c->checkConnection();
+    check("ping $k comes with a VALID key -> failed with TackQuote's own message, no fallback",
+        $r['result'] === TackApiClient::CONNECTION_FAILED && $c->paths === $pingOnly
+            && $r['message'] === json_decode($fix[$k], true)['message']);
+}
+$html = adminTestConnection([403, $fix['403_plan']]);
+check('admin: ping 403 plan limit -> the plan-limit sentence, not a key error',
+    strpos($html, 'ERROR:Could not connect to TackQuote: You have reached your plan limit of 1000 API calls') === 0
+        && strpos($html, 'rejected') === false);
+$html = adminTestConnection([403, $fix['evil_403']]);
+check('admin: TackQuote\'s message is escaped before displayError() prints it as HTML',
+    strpos($html, '<img') === false && strpos($html, 'blocked') !== false);
+
+foreach (['network' => null, '404' => [404, $fix['404']], '500' => [500, $fix['500']], '503' => [503, $fix['503']]] as $label => $ping) {
+    $c = scriptedClient($ping);
+    check("ping $label + /health 200 -> reachable, key unchecked",
+        $c->checkConnection()['result'] === TackApiClient::CONNECTION_KEY_UNCHECKED && $c->paths === $withHealth);
+    $html = adminTestConnection($ping);
+    check("admin: ping $label + /health 200 -> warning, never 'Connected'",
+        strpos($html, 'WARN:TackQuote is reachable, but the API key could not be checked') === 0
+            && stripos($html, 'connected') === false);
+    check("ping $label + /health down -> failed",
+        scriptedClient($ping, null)->checkConnection()['result'] === TackApiClient::CONNECTION_FAILED);
+    check("legacy testConnection() on $label is not true", scriptedClient($ping)->testConnection() !== true);
+}
+
+$c = scriptedClient([429, '{"statusCode":429,"message":"ThrottlerException: Too Many Requests"}']);
+check('ping 429 -> failed, no /health fallback',
+    $c->checkConnection()['result'] === TackApiClient::CONNECTION_FAILED && $c->paths === $pingOnly);
+
+if (function_exists('curl_init')) {
+    $real = (new TackApiClient('http://127.0.0.1:9', 'live_key', '1.4.1'))->checkConnection();
+    check('real transport: refused connection -> failed with a Connection error',
+        $real['result'] === TackApiClient::CONNECTION_FAILED && strpos($real['message'], 'Connection error') === 0);
+}
+
+// ---------------------------------------------------------------------------
 // 10. The manifest and the documented contract.
 //
 // Added when this module was reconciled against the TackQuote monorepo copy before that

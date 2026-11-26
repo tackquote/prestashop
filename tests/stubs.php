@@ -75,6 +75,16 @@ class Configuration
 
 class Tools
 {
+    /** Same body as PrestaShop core's Tools::safeOutput() (classes/Tools.php, 1.7.0.0 and develop). */
+    public static function safeOutput($string, $html = false)
+    {
+        if (!$html) {
+            $string = strip_tags($string);
+        }
+
+        return @htmlentities((string) $string, ENT_QUOTES, 'utf-8');
+    }
+
     /** @var array<string,mixed> */
     public static $request = [];
 
@@ -351,5 +361,10 @@ abstract class Module
     public function displayConfirmation($msg)
     {
         return 'OK:' . $msg;
+    }
+
+    public function displayWarning($msg)
+    {
+        return 'WARN:' . $msg;
     }
 }

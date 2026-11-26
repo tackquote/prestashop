@@ -77,7 +77,7 @@ class TackQuotes extends Module
     {
         $this->name = 'tackquotes';
         $this->tab = 'front_office_features';
-        $this->version = '1.4.0';
+        $this->version = '1.4.1';
         $this->author = 'TackQuote';
         // 1, not 0: PrestaShop skips constructing the module when rendering the Modules
         // page if this is 0, so `$this->warning` set in this constructor would never be
@@ -305,20 +305,50 @@ class TackQuotes extends Module
      */
     protected function processTestConnection()
     {
-        $client = new TackApiClient(
+        $client = $this->connectionClient();
+
+        // A rejected key and an unchecked key each get their own wording: the old check
+        // fell back to /health on any failure, and /health answers 200 with no key, so a
+        // wrong or revoked key used to read "Connected".
+        $check = $client->checkConnection();
+
+        switch ($check['result']) {
+            case TackApiClient::CONNECTION_OK:
+                return $this->displayConfirmation($this->trans('Connected to TackQuote successfully.', [], 'Modules.Tackquotes.Admin'));
+            case TackApiClient::CONNECTION_KEY_REJECTED:
+                return $this->displayError(
+                    $this->trans('TackQuote rejected this API key. Check it in TackQuote under Settings > Developer > API keys.', [], 'Modules.Tackquotes.Admin')
+                );
+            case TackApiClient::CONNECTION_KEY_UNCHECKED:
+                return $this->displayWarning(
+                    $this->trans('TackQuote is reachable, but the API key could not be checked. Try again in a few minutes.', [], 'Modules.Tackquotes.Admin')
+                );
+            default:
+                // displayError() prints its argument as HTML, and this text came from
+                // whatever host the merchant typed into "TackQuote API URL" (or from a
+                // TackQuote 403 such as the plan-limit sentence). Tools::safeOutput()
+                // strips tags and HTML-escapes it (PrestaShop core, 1.7.0.0 through 9).
+                return $this->displayError(
+                    sprintf(
+                        $this->trans('Could not connect to TackQuote: %s', [], 'Modules.Tackquotes.Admin'),
+                        Tools::safeOutput($check['message'])
+                    )
+                );
+        }
+    }
+
+    /**
+     * The client processTestConnection() uses. A seam so the status-to-message mapping
+     * can be tested without a network.
+     *
+     * @return TackApiClient
+     */
+    protected function connectionClient()
+    {
+        return new TackApiClient(
             Configuration::get(self::CONFIG_API_URL),
             Configuration::get(self::CONFIG_API_KEY),
             $this->version
-        );
-
-        $result = $client->testConnection();
-
-        if ($result === true) {
-            return $this->displayConfirmation($this->trans('Connected to TackQuote successfully.', [], 'Modules.Tackquotes.Admin'));
-        }
-
-        return $this->displayError(
-            sprintf($this->trans('Could not connect to TackQuote: %s', [], 'Modules.Tackquotes.Admin'), (string) $result)
         );
     }
 
