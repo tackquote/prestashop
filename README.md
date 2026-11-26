@@ -107,9 +107,9 @@ work still to do. That was stale: the controller shipped, and "Test connection" 
 storefront button both work against a current Tack API.
 
 - `GET /integrations/prestashop/ping` → `{ ok: true, tenantId }`. Used by "Test
-  connection", which falls back to `GET /health` only for a Tack deployment older than that
-  route (a `/health` success proves the URL is reachable, not that the key is valid for a
-  tenant).
+  connection", which falls back to `GET /health` only when the ping got no answer, a 404
+  or a 5xx (TackQuote's own `/health` proves the API is reachable, not that the key is
+  valid for a tenant; after a 404 it shows the API URL setting is wrong).
 - `POST /integrations/prestashop/quote-requests` → upserts the referenced products, then
   registers the buyer and creates a draft quote through the canonical pipeline.
 
@@ -352,8 +352,15 @@ key read "Connected to TackQuote successfully."
 - A 403 comes with a valid key (for example the plan's monthly API-call limit) and shows
   TackQuote's own message, HTML-escaped, with no fallback.
 - `/health` is tried only when the ping got no answer (network error, timeout), a 404
-  (an older TackQuote API) or a 5xx. If `/health` then answers, the result is a warning
-  that TackQuote is reachable but the API key could not be checked, never "Connected".
+  or a 5xx, and it counts only when the body is TackQuote's own health answer
+  (`"status": "ok"`, `"database": "connected"`, a numeric `uptime`), never a web page or
+  another service's `{"status":"ok"}`. After no answer or a 5xx, TackQuote's `/health`
+  gives a warning that TackQuote is reachable but the API key could not be checked,
+  never "Connected".
+- A 404 from the ping means the *TackQuote API URL* setting is almost always wrong
+  (usually missing `/v1`). When TackQuote's `/health` answers at that host, the button
+  says *TackQuote answered, but not at the API address: check the TackQuote API URL
+  setting (it should end in /v1)* instead of asking you to try again.
 - Any other ping status (400, 429, ...) is reported as an error with TackQuote's message.
 - A 2xx counts as connected only when it is the ping's own `{"ok": true}`, so a wrong
   API URL serving a web page is an error. A lapsed TackQuote account still answers that,

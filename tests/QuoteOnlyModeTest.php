@@ -494,7 +494,10 @@ $fix = [
     '500' => '{"statusCode":500,"message":"Internal server error"}',
     '503' => '<html><body><h1>503 Service Unavailable</h1></body></html>',
     'html_200' => '<!doctype html><html><head><title>My shop</title></head><body>Welcome</body></html>',
-    'health' => '{"status":"ok","database":"connected","redis":"writable"}',
+    'health' => '{"status":"ok","database":"connected","redis":"writable","version":"unknown","uptime":51234.5,"timestamp":"2026-11-27T00:00:00.000Z"}',
+    // Shapes that are NOT TackQuote's /health and must never count as reachable.
+    'health_other' => '{"status":"ok"}',
+    'health_404' => '{"statusCode":404,"code":"NOTFOUND","message":"Cannot GET /api/v1/health","path":"/api/v1/health"}',
     'evil_403' => '{"message":"<img src=x onerror=alert(1)>blocked"}',
 ];
 
@@ -503,11 +506,14 @@ class ScriptedTackApiClient extends TackApiClient
     public $answers = [];
     public $paths = [];
 
-    protected function transport($method, $path, $body = null)
+    protected function transport($method, $path, $body = null, $base = null)
     {
-        $this->paths[] = $method . ' ' . $path;
+        // The configured API URL is recorded as the bare path, any other base in full.
+        $key = ($base === null ? '' : $base) . $path;
+        $this->paths[] = $method . ' ' . $key;
 
-        return $this->answers[$path];
+        // Anything not scripted gets no HTTP answer at all, as an unreachable host would.
+        return isset($this->answers[$key]) ? $this->answers[$key] : rawAnswer(null);
     }
 }
 
@@ -519,17 +525,20 @@ function rawAnswer($answer)
         : ['error' => null, 'status' => $answer[0], 'body' => $answer[1]];
 }
 
-function scriptedClient($ping, $health = 'default')
+function scriptedClient($ping, $health = 'default', $baseUrl = 'https://api.tackquote.com/v1', $extra = [])
 {
     global $fix;
     if ($health === 'default') {
         $health = [200, $fix['health']];
     }
-    $client = new ScriptedTackApiClient('https://api.tackquote.com/v1', 'live_key', '1.4.1');
+    $client = new ScriptedTackApiClient($baseUrl, 'live_key', '1.4.1');
     $client->answers = [
         '/integrations/prestashop/ping' => rawAnswer($ping),
         '/health' => rawAnswer($health),
     ];
+    foreach ($extra as $key => $answer) {
+        $client->answers[$key] = rawAnswer($answer);
+    }
 
     return $client;
 }
@@ -549,9 +558,9 @@ class ProbeConnectionModule extends TestableTackQuotes
     }
 }
 
-function adminTestConnection($ping, $health = 'default')
+function adminTestConnection($ping, $health = 'default', $baseUrl = 'https://api.tackquote.com/v1')
 {
-    ProbeConnectionModule::$client = scriptedClient($ping, $health);
+    ProbeConnectionModule::$client = scriptedClient($ping, $health, $baseUrl);
     makeModule();
     $module = new ProbeConnectionModule();
 
@@ -606,6 +615,40 @@ foreach (['network' => null, '404' => [404, $fix['404']], '500' => [500, $fix['5
         scriptedClient($ping, null)->checkConnection()['result'] === TackApiClient::CONNECTION_FAILED);
     check("legacy testConnection() on $label is not true", scriptedClient($ping)->testConnection() !== true);
 }
+
+// Not TackQuote's /health: a generic {"status":"ok"} or a shop page proves nothing.
+foreach (['network' => null, '500' => [500, $fix['500']], '404' => [404, $fix['404']]] as $label => $ping) {
+    foreach (['health_other' => [200, $fix['health_other']], 'html_200' => [200, $fix['html_200']]] as $hl => $health) {
+        check("ping $label + /health 200 $hl (not TackQuote's) -> failed, never reachable",
+            scriptedClient($ping, $health)->checkConnection()['result'] === TackApiClient::CONNECTION_FAILED);
+    }
+}
+
+// A 404 where TackQuote's /health answers means the API URL setting is wrong.
+$wrongAddressText = 'TackQuote answered, but not at the API address: check the TackQuote API URL setting (it should end in /v1).';
+$noV1 = 'https://api.tackquote.com';
+$c = scriptedClient([404, $fix['404']], 'default', $noV1);
+check('API URL without /v1: ping 404 + TackQuote /health -> wrong address, origin not probed twice',
+    $c->checkConnection()['result'] === TackApiClient::CONNECTION_WRONG_ADDRESS && $c->paths === $withHealth);
+check('wrong address -> legacy testConnection() names the API URL setting',
+    scriptedClient([404, $fix['404']], 'default', $noV1)->testConnection() === $wrongAddressText);
+$html = adminTestConnection([404, $fix['404']], 'default', $noV1);
+check('admin: API URL without /v1 -> the "not at the API address" error, not "try again"',
+    $html === 'ERROR:' . $wrongAddressText);
+
+$wrongPath = 'https://api.tackquote.com/api/v1';
+$rootHealth = 'https://api.tackquote.com/health';
+$c = scriptedClient([404, $fix['404']], [404, $fix['health_404']], $wrongPath, [$rootHealth => [200, $fix['health']]]);
+check('wrong path ending in /v1: ping 404, /health 404, root /health TackQuote -> wrong address',
+    $c->checkConnection()['result'] === TackApiClient::CONNECTION_WRONG_ADDRESS
+        && $c->paths === ['GET /integrations/prestashop/ping', 'GET /health', 'GET ' . $rootHealth]);
+$c = scriptedClient([404, $fix['404']], [404, $fix['health_404']], $wrongPath, [$rootHealth => [200, $fix['html_200']]]);
+check('wrong path, root answers a web page -> failed', $c->checkConnection()['result'] === TackApiClient::CONNECTION_FAILED);
+$c = scriptedClient([404, $fix['404']], [404, $fix['health_404']], $wrongPath, [$rootHealth => null]);
+check('wrong path, root unreachable -> failed', $c->checkConnection()['result'] === TackApiClient::CONNECTION_FAILED);
+$c = scriptedClient([404, $fix['404']], [200, $fix['html_200']], 'https://shop.example');
+check('a bare origin answering a web page -> failed, origin not probed again',
+    $c->checkConnection()['result'] === TackApiClient::CONNECTION_FAILED && $c->paths === $withHealth);
 
 $c = scriptedClient([429, '{"statusCode":429,"message":"ThrottlerException: Too Many Requests"}']);
 check('ping 429 -> failed, no /health fallback',
